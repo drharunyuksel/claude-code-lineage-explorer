@@ -55,17 +55,23 @@ flowchart LR
     end
 
     subgraph use ["⚡ Daily use — zero cost"]
-        D <--> E["AI Agent"]:::agent
-        E <--> F["Which pipeline writes\nto this table?"]:::question
-        E <--> G["What source tables\nfeed into this view?"]:::question
-        E <--> H["Debug: why is this\ntable stale?"]:::question
+        F["👤 User"]:::user -- "Which pipeline writes to this table?" --> E["AI Agent"]:::agent
+        F -- "What source tables feed into this view?" --> E
+        F -- "Debug: why is this table stale?" --> E
+        E <--> D
+        E -- "answers" --> F
     end
 
     classDef bq fill:#4285F4,stroke:#1a73e8,color:#fff
     classDef code fill:#34A853,stroke:#1e8e3e,color:#fff
     classDef db fill:#FBBC04,stroke:#f9a825,color:#333
     classDef agent fill:#EA4335,stroke:#d93025,color:#fff
-    classDef question fill:#9C27B0,stroke:#7B1FA2,color:#fff
+    classDef user fill:#FF6D01,stroke:#E65100,color:#fff
+
+    linkStyle 3 stroke:#FF6D01,stroke-width:2px
+    linkStyle 4 stroke:#FF6D01,stroke-width:2px
+    linkStyle 5 stroke:#FF6D01,stroke-width:2px
+    linkStyle 7 stroke:#34A853,stroke-width:2px
 ```
 
 1. **Query BigQuery job history** — Reads `INFORMATION_SCHEMA.JOBS` from the last 60 days to find every write operation (INSERT, MERGE, CREATE TABLE). For each write, it captures the target table, source tables, the pipeline that triggered it (from Airflow job labels or user email), and timestamps.
