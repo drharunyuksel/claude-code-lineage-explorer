@@ -1,7 +1,13 @@
-lineage.db
+# Generated at runtime — not committed
+.venv/
+
+# Python
 __pycache__/
 *.pyc
-.venv/
+
+# OS / editor
 .DS_Store
-/tmp/lineage_explorer_*
+
+# Repo-specific (not part of the installed skill)
 CLAUDE.md
+.claude

@@ -59,6 +59,12 @@ Install this skill: https://github.com/drharunyuksel/claude-code-data-lineage
 
 Claude will read the repository and set up the skill for you.
 
+Add to your project's `.gitignore`:
+
+```
+.claude/skills/data-lineage/
+```
+
 ## Prerequisites
 
 - **A BigQuery MCP tool** configured in your Claude Code settings. Any MCP server that can run read-only BigQuery queries will work. For example, [mcp-bigquery-server](https://github.com/ergut/mcp-bigquery-server) is a lightweight, read-only option.

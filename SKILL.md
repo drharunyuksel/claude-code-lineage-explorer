@@ -16,6 +16,7 @@ This skill must be installed inside the project's `.claude/skills/` directory, *
 ```
 <project-root>/.claude/skills/data-lineage/
 ├── SKILL.md
+├── .gitignore
 ├── scripts/
 │   ├── schema.sql
 │   ├── insert_job_history.py
@@ -26,14 +27,11 @@ This skill must be installed inside the project's `.claude/skills/` directory, *
 └── .venv/          (created automatically on first run)
 ```
 
-Add to `.gitignore`:
+Add to your project's `.gitignore`:
 
 ```
-.claude/skills/data-lineage/.venv/
-.claude/skills/data-lineage/lineage.db
+.claude/skills/data-lineage/
 ```
-
-The venv and database are created automatically and rebuilt on demand — neither should be committed.
 
 ---
 
