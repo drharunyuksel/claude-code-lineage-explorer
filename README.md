@@ -215,6 +215,10 @@ Install this skill for our Snowflake warehouse: https://github.com/drharunyuksel
 
 Claude will read the skill, understand the approach, and modify the `INFORMATION_SCHEMA` queries and SQL parsing to match your warehouse's syntax.
 
+## What's Next
+
+Want lineage in your data warehouse alongside local SQLite — so your whole team can query it? You can ask Claude to generate an ETL (Airflow, Prefect, cron, or any scheduler) that writes the same lineage data to a BigQuery, Snowflake, or Redshift table on a schedule.
+
 ## License
 
 MIT
