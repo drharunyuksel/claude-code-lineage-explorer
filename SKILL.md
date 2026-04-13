@@ -5,18 +5,41 @@ description: "Scan a local codebase and query BigQuery INFORMATION_SCHEMA to bui
 
 # BigQuery Lineage Builder
 
-Build a complete table lineage graph from your codebase and BigQuery metadata. Output is a SQLite database (`lineage.db`) in the repo root.
+Build a complete table lineage graph from your codebase and BigQuery metadata. Output is a SQLite database (`lineage.db`) in the skill directory.
+
+---
+
+## Installation
+
+This skill must be installed inside the project's `.claude/skills/` directory, **not** the global `~/.claude/skills/`. This ensures it is scoped to the repository.
+
+```
+<project-root>/.claude/skills/lineage-explorer/
+├── SKILL.md
+├── lineage.db      (created automatically on first run)
+└── .venv/          (created automatically on first run)
+```
+
+Add to `.gitignore`:
+
+```
+.claude/skills/lineage-explorer/.venv/
+.claude/skills/lineage-explorer/lineage.db
+```
+
+The venv and database are created automatically and rebuilt on demand — neither should be committed.
 
 ---
 
 ## Step 0: Staleness Check
 
-Before doing anything else, check if `lineage.db` already exists in the repo root.
+Before doing anything else, check if `lineage.db` already exists in the skill directory (`SKILL_DIR`, resolved in Step 1b).
 
 **If it exists**, check its age via Bash:
 
 ```bash
-DB_PATH="lineage.db"
+SKILL_DIR=".claude/skills/lineage-explorer"
+DB_PATH="$SKILL_DIR/lineage.db"
 if [ -f "$DB_PATH" ]; then
   AGE_DAYS=$(( ($(date +%s) - $(stat -f %m "$DB_PATH" 2>/dev/null || stat -c %Y "$DB_PATH")) / 86400 ))
   echo "$AGE_DAYS"
@@ -57,11 +80,7 @@ If the tool is not available or the query fails, stop and tell the user:
 
 ### 1b. Set up Python virtual environment
 
-Determine the skill's install directory — the directory containing this SKILL.md file. Search for it by checking:
-1. The current project's `skills/lineage-explorer/` directory
-2. Or search for `lineage-explorer/SKILL.md` under `~/.claude/`
-
-Set `SKILL_DIR` to that directory. Then run via Bash:
+The skill directory is `.claude/skills/lineage-explorer/` inside the current project (the directory containing this SKILL.md file). Set `SKILL_DIR` to that path. Then run via Bash:
 
 ```bash
 SKILL_DIR="<resolved path to lineage-explorer directory>"
@@ -92,7 +111,7 @@ Use the Read tool to check if `.lineage-explorer.json` exists in the repo root. 
 | `lookback_days` | `60` | How far back to query job history (max ~60 days via MCP tool billing limit) |
 | `dags_dir` | auto-detect | Directory containing DAG files |
 | `exclude_datasets` | `[]` | Datasets to exclude from results |
-| `db_path` | `lineage.db` | Output SQLite path |
+| `db_path` | `<SKILL_DIR>/lineage.db` | Output SQLite path |
 
 ### 2b. Auto-detect project_id
 
