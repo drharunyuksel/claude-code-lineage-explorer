@@ -2,6 +2,34 @@
 
 A Claude Code skill that builds BigQuery table lineage from your codebase and INFORMATION_SCHEMA metadata. One command to map every pipeline to every table.
 
+```mermaid
+flowchart LR
+    subgraph build ["☁️ One-time build"]
+        A["BigQuery\nINFORMATION_SCHEMA.JOBS"]:::bq --> D["SQLite\nlineage.db"]:::db
+        B["Codebase Scan\nPython · SQL · JSON · YAML"]:::code --> D
+        C["BigQuery\nINFORMATION_SCHEMA.VIEWS\n+ sqlglot parsing"]:::bq --> D
+    end
+
+    subgraph use ["⚡ Daily use — zero cost"]
+        F["👤 User"]:::user -- "Which pipeline writes to this table?" --> E["AI Agent"]:::agent
+        F -- "What source tables feed into this view?" --> E
+        F -- "Debug: why is this table stale?" --> E
+        E <--> D
+        E -- "answers" --> F
+    end
+
+    classDef bq fill:#4285F4,stroke:#1a73e8,color:#fff
+    classDef code fill:#34A853,stroke:#1e8e3e,color:#fff
+    classDef db fill:#FBBC04,stroke:#f9a825,color:#333
+    classDef agent fill:#303F9F,stroke:#1A237E,color:#fff
+    classDef user fill:#00897B,stroke:#00695C,color:#fff
+
+    linkStyle 3 stroke:#00897B,stroke-width:2px
+    linkStyle 4 stroke:#00897B,stroke-width:2px
+    linkStyle 5 stroke:#00897B,stroke-width:2px
+    linkStyle 7 stroke:#34A853,stroke-width:2px
+```
+
 ## Why
 
 - **Debugging is slow without lineage** — Something breaks in a dashboard. The first question is always "which pipeline writes to this table?" Without lineage, you're searching through code, tracing table names across files, and asking teammates. With 50+ pipelines, this takes 20-30 minutes every time.
@@ -45,34 +73,6 @@ Navigate to your data project repo and run:
 ```
 
 On the first run, the skill builds the lineage database in four steps:
-
-```mermaid
-flowchart LR
-    subgraph build ["☁️ One-time build"]
-        A["BigQuery\nINFORMATION_SCHEMA.JOBS"]:::bq --> D["SQLite\nlineage.db"]:::db
-        B["Codebase Scan\nPython · SQL · JSON · YAML"]:::code --> D
-        C["BigQuery\nINFORMATION_SCHEMA.VIEWS\n+ sqlglot parsing"]:::bq --> D
-    end
-
-    subgraph use ["⚡ Daily use — zero cost"]
-        F["👤 User"]:::user -- "Which pipeline writes to this table?" --> E["AI Agent"]:::agent
-        F -- "What source tables feed into this view?" --> E
-        F -- "Debug: why is this table stale?" --> E
-        E <--> D
-        E -- "answers" --> F
-    end
-
-    classDef bq fill:#4285F4,stroke:#1a73e8,color:#fff
-    classDef code fill:#34A853,stroke:#1e8e3e,color:#fff
-    classDef db fill:#FBBC04,stroke:#f9a825,color:#333
-    classDef agent fill:#303F9F,stroke:#1A237E,color:#fff
-    classDef user fill:#00897B,stroke:#00695C,color:#fff
-
-    linkStyle 3 stroke:#00897B,stroke-width:2px
-    linkStyle 4 stroke:#00897B,stroke-width:2px
-    linkStyle 5 stroke:#00897B,stroke-width:2px
-    linkStyle 7 stroke:#34A853,stroke-width:2px
-```
 
 1. **Query BigQuery job history** — Reads `INFORMATION_SCHEMA.JOBS` from the last 60 days to find every write operation (INSERT, MERGE, CREATE TABLE). For each write, it captures the target table, source tables, the pipeline that triggered it (from Airflow job labels or user email), and timestamps.
 
