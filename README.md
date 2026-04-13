@@ -48,18 +48,24 @@ On the first run, the skill builds the lineage database in four steps:
 
 ```mermaid
 flowchart LR
-    subgraph build ["One-time build"]
-        A["BigQuery\nINFORMATION_SCHEMA.JOBS"] --> D["SQLite\nlineage.db"]
-        B["Codebase Scan\nPython · SQL · JSON · YAML"] --> D
-        C["BigQuery\nINFORMATION_SCHEMA.VIEWS\n+ sqlglot parsing"] --> D
+    subgraph build ["☁️ One-time build"]
+        A["BigQuery\nINFORMATION_SCHEMA.JOBS"]:::bq --> D["SQLite\nlineage.db"]:::db
+        B["Codebase Scan\nPython · SQL · JSON · YAML"]:::code --> D
+        C["BigQuery\nINFORMATION_SCHEMA.VIEWS\n+ sqlglot parsing"]:::bq --> D
     end
 
-    subgraph use ["Daily use — zero cost"]
-        D --> E["AI Agent"]
-        E --> F["'Which pipeline writes\nto this table?'"]
-        E --> G["'What source tables\nfeed into this view?'"]
-        E --> H["'Debug: why is this\ntable stale?'"]
+    subgraph use ["⚡ Daily use — zero cost"]
+        D <--> E["AI Agent"]:::agent
+        E <--> F["Which pipeline writes\nto this table?"]:::question
+        E <--> G["What source tables\nfeed into this view?"]:::question
+        E <--> H["Debug: why is this\ntable stale?"]:::question
     end
+
+    classDef bq fill:#4285F4,stroke:#1a73e8,color:#fff
+    classDef code fill:#34A853,stroke:#1e8e3e,color:#fff
+    classDef db fill:#FBBC04,stroke:#f9a825,color:#333
+    classDef agent fill:#EA4335,stroke:#d93025,color:#fff
+    classDef question fill:#9C27B0,stroke:#7B1FA2,color:#fff
 ```
 
 1. **Query BigQuery job history** — Reads `INFORMATION_SCHEMA.JOBS` from the last 60 days to find every write operation (INSERT, MERGE, CREATE TABLE). For each write, it captures the target table, source tables, the pipeline that triggered it (from Airflow job labels or user email), and timestamps.
