@@ -1,6 +1,6 @@
 ---
-name: lineage-explorer
-description: "Scan a local codebase and query BigQuery INFORMATION_SCHEMA to build a table lineage graph stored in SQLite. Use when asked to build lineage, map pipelines to tables, answer 'which pipeline writes to this table?', or trace BigQuery table dependencies. Triggers on: /lineage-explorer, 'build lineage', 'table lineage', 'pipeline mapping'."
+name: data-lineage
+description: "Build and query a data lineage graph from your codebase and BigQuery metadata. Use this skill for ANY question about where data comes from, where it goes, or how tables relate to each other. Example questions: 'What are the source tables for the users table?', 'Which pipeline writes to orders?', 'What feeds into the revenue dashboard?', 'Where does this table get its data from?', 'What tables does the daily_sync DAG write to?', 'Show me upstream dependencies for this view', 'What would break if I change this table?'. Triggers on: /data-lineage, source tables, feeds into, depends on, writes to, upstream, downstream, data flow, lineage, table dependencies, where does this table come from, which pipeline, impact analysis."
 ---
 
 # BigQuery Lineage Builder
@@ -14,7 +14,7 @@ Build a complete table lineage graph from your codebase and BigQuery metadata. O
 This skill must be installed inside the project's `.claude/skills/` directory, **not** the global `~/.claude/skills/`. This ensures it is scoped to the repository.
 
 ```
-<project-root>/.claude/skills/lineage-explorer/
+<project-root>/.claude/skills/data-lineage/
 ├── SKILL.md
 ├── lineage.db      (created automatically on first run)
 └── .venv/          (created automatically on first run)
@@ -23,8 +23,8 @@ This skill must be installed inside the project's `.claude/skills/` directory, *
 Add to `.gitignore`:
 
 ```
-.claude/skills/lineage-explorer/.venv/
-.claude/skills/lineage-explorer/lineage.db
+.claude/skills/data-lineage/.venv/
+.claude/skills/data-lineage/lineage.db
 ```
 
 The venv and database are created automatically and rebuilt on demand — neither should be committed.
@@ -38,7 +38,7 @@ Before doing anything else, check if `lineage.db` already exists in the skill di
 **If it exists**, check its age via Bash:
 
 ```bash
-SKILL_DIR=".claude/skills/lineage-explorer"
+SKILL_DIR=".claude/skills/data-lineage"
 DB_PATH="$SKILL_DIR/lineage.db"
 if [ -f "$DB_PATH" ]; then
   AGE_DAYS=$(( ($(date +%s) - $(stat -f %m "$DB_PATH" 2>/dev/null || stat -c %Y "$DB_PATH")) / 86400 ))
@@ -50,7 +50,7 @@ Then decide:
 
 - **If the user asked a lineage question** (e.g., "which pipeline writes to X?", "show me source tables for Y") **and the database is less than 7 days old**: Tell the user: "Lineage database is current (last updated {AGE_DAYS} day(s) ago). Querying..." Then skip the build and go directly to querying `lineage.db` with SQLite to answer the question. Do NOT rebuild.
 - **If the database is 7 or more days old**: Tell the user: "The lineage database is {AGE_DAYS} days old. Would you like me to refresh it before I answer?" If yes, proceed to Step 1. If no, query the existing database.
-- **If the user explicitly asked to build/rebuild lineage** (e.g., `/lineage-explorer`, "rebuild lineage", "refresh lineage"): Always proceed to Step 1 regardless of age.
+- **If the user explicitly asked to build/rebuild lineage** (e.g., `/data-lineage`, "rebuild lineage", "refresh lineage"): Always proceed to Step 1 regardless of age.
 
 **If it does not exist**, proceed to Step 1.
 
@@ -74,10 +74,10 @@ If the tool is not available or the query fails, stop and tell the user:
 
 ### 1b. Set up Python virtual environment
 
-The skill directory is `.claude/skills/lineage-explorer/` inside the current project (the directory containing this SKILL.md file). Set `SKILL_DIR` to that path. Then run via Bash:
+The skill directory is `.claude/skills/data-lineage/` inside the current project (the directory containing this SKILL.md file). Set `SKILL_DIR` to that path. Then run via Bash:
 
 ```bash
-SKILL_DIR="<resolved path to lineage-explorer directory>"
+SKILL_DIR="<resolved path to data-lineage directory>"
 if [ ! -d "$SKILL_DIR/.venv" ]; then
   python3 -m venv "$SKILL_DIR/.venv"
   "$SKILL_DIR/.venv/bin/pip" install --quiet sqlglot

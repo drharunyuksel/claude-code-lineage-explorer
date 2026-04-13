@@ -1,4 +1,4 @@
-# claude-code-lineage-explorer
+# claude-code-data-lineage
 
 A Claude Code skill that builds BigQuery table lineage from your codebase and INFORMATION_SCHEMA metadata. One command to map every pipeline to every table.
 
@@ -54,7 +54,7 @@ flowchart LR
 Open Claude Code and paste:
 
 ```
-Install this skill: https://github.com/drharunyuksel/claude-code-lineage-explorer
+Install this skill: https://github.com/drharunyuksel/claude-code-data-lineage
 ```
 
 Claude will read the repository and set up the skill for you.
@@ -69,7 +69,7 @@ Claude will read the repository and set up the skill for you.
 Navigate to your data project repo and run:
 
 ```
-/lineage-explorer
+/data-lineage
 ```
 
 On the first run, the skill builds the lineage database in four steps:
@@ -88,7 +88,7 @@ The skill doesn't rebuild every time — it checks the database age first:
 
 - **Less than 7 days old** — Skips the build, queries the existing database directly. You'll see: "Lineage database is current (last updated N day(s) ago)."
 - **7 or more days old** — Asks if you'd like to refresh before answering.
-- **Explicit refresh** — Force a rebuild anytime with `/lineage-explorer refresh`.
+- **Explicit refresh** — Force a rebuild anytime with `/data-lineage refresh`.
 
 The defaults are 7 days for refresh and 60 days for job history lookback. To change them, edit the values directly in `SKILL.md`.
 
@@ -195,7 +195,7 @@ This skill is designed and tested for **BigQuery**. It queries BigQuery's `INFOR
 However, since this is a Claude Code skill (not compiled code), your AI agent can adapt it for other data warehouses. Try prompting:
 
 ```
-Install this skill for our Snowflake warehouse: https://github.com/drharunyuksel/claude-code-lineage-explorer
+Install this skill for our Snowflake warehouse: https://github.com/drharunyuksel/claude-code-data-lineage
 ```
 
 Claude will read the skill, understand the approach, and modify the `INFORMATION_SCHEMA` queries and SQL parsing to match your warehouse's syntax.
