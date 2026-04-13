@@ -54,13 +54,7 @@ Then decide:
 
 **If it does not exist**, proceed to Step 1.
 
-The staleness threshold (default: 7 days) can be overridden in `.lineage-explorer.json`:
-
-```json
-{
-  "refresh_after_days": 7
-}
-```
+The staleness threshold is 7 days.
 
 ---
 
@@ -76,7 +70,7 @@ SELECT 1 AS ok
 
 If the tool is not available or the query fails, stop and tell the user:
 
-> "The BigQuery MCP tool (`mcp__bigquery_local__query`) is required but not configured. Please add it to your MCP settings. See: https://github.com/ergut/mcp-bigquery"
+> "The BigQuery MCP tool (`mcp__bigquery_local__query`) is required but not configured. Please add it to your MCP settings. See: https://github.com/ergut/mcp-bigquery-server"
 
 ### 1b. Set up Python virtual environment
 
@@ -98,30 +92,17 @@ Store `VENV_PYTHON` for use in later steps. If venv creation fails, note that vi
 
 ---
 
-## Step 2: Configuration
+## Step 2: Auto-detect project_id
 
-### 2a. Check for config file
-
-Use the Read tool to check if `.lineage-explorer.json` exists in the repo root. If it does, parse it for these fields:
-
-| Field | Default | Description |
-|---|---|---|
-| `project_id` | auto-detect | GCP project ID |
-| `location` | `US` | BigQuery location |
-| `lookback_days` | `60` | How far back to query job history (max ~60 days via MCP tool billing limit) |
-| `dags_dir` | auto-detect | Directory containing DAG files |
-| `exclude_datasets` | `[]` | Datasets to exclude from results |
-| `db_path` | `<SKILL_DIR>/lineage.db` | Output SQLite path |
-
-### 2b. Auto-detect project_id
-
-If `project_id` is not set, use Grep to find the first BigQuery fully-qualified table reference in the codebase:
+Use Grep to find the first BigQuery fully-qualified table reference in the codebase:
 
 ```
 pattern: [a-z][a-z0-9-]+\.[a-zA-Z_]\w+\.[a-zA-Z_]\w+
 ```
 
 Extract the first segment (before the first dot) as `project_id`. Confirm with the user: "Detected project ID: `{project_id}`. Is this correct?"
+
+Set `DB_PATH` to `$SKILL_DIR/lineage.db` and `LOOKBACK_DAYS` to `60`.
 
 ---
 
@@ -146,7 +127,7 @@ Print: `"Detected orchestrator: {ORCHESTRATOR}"`
 Run via Bash:
 
 ```bash
-DB_PATH="<configured db_path, default: lineage.db>"
+DB_PATH="$SKILL_DIR/lineage.db"
 rm -f "$DB_PATH"
 sqlite3 "$DB_PATH" <<'SQL'
 CREATE TABLE lineage (
@@ -760,7 +741,7 @@ Replace `<VIEWS_JSON>` with the JSON output from the MCP query in Step 7a. For l
 Run these queries via Bash and display the results:
 
 ```bash
-DB_PATH="<configured db_path>"
+DB_PATH="$SKILL_DIR/lineage.db"
 
 TABLES=$(sqlite3 "$DB_PATH" "SELECT COUNT(DISTINCT target_dataset || '.' || target_name) FROM lineage WHERE target_type='TABLE'")
 VIEWS=$(sqlite3 "$DB_PATH" "SELECT COUNT(DISTINCT target_dataset || '.' || target_name) FROM lineage WHERE target_type='VIEW'")

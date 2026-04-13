@@ -61,7 +61,7 @@ Claude will read the repository and set up the skill for you.
 
 ## Prerequisites
 
-- **A BigQuery MCP tool** configured in your Claude Code settings. Any MCP server that can run read-only BigQuery queries will work. For example, [mcp-bigquery](https://github.com/ergut/mcp-bigquery) is a lightweight, read-only option.
+- **A BigQuery MCP tool** configured in your Claude Code settings. Any MCP server that can run read-only BigQuery queries will work. For example, [mcp-bigquery-server](https://github.com/ergut/mcp-bigquery-server) is a lightweight, read-only option.
 - Read access to `INFORMATION_SCHEMA.JOBS` and `INFORMATION_SCHEMA.VIEWS` in your BigQuery project
 
 ## Usage
@@ -90,7 +90,7 @@ The skill doesn't rebuild every time — it checks the database age first:
 - **7 or more days old** — Asks if you'd like to refresh before answering.
 - **Explicit refresh** — Force a rebuild anytime with `/lineage-explorer refresh`.
 
-The 7-day threshold can be changed in `.lineage-explorer.json` with `"refresh_after_days": N`.
+The defaults are 7 days for refresh and 60 days for job history lookback. To change them, edit the values directly in `SKILL.md`.
 
 ## What It Builds
 
@@ -181,21 +181,6 @@ CREATE TABLE lineage (
   job_count       INTEGER,
   user_email      TEXT
 );
-```
-
-## Configuration
-
-The skill works with zero configuration for standard setups. Optionally create `.lineage-explorer.json` in your repo root:
-
-```json
-{
-  "project_id": "my-gcp-project",
-  "location": "US",
-  "lookback_days": 60,
-  "dags_dir": "dags",
-  "exclude_datasets": ["_temp", "_staging"],
-  "db_path": "lineage.db"
-}
 ```
 
 ## Orchestrator Support
