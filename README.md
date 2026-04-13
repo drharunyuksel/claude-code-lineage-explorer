@@ -46,6 +46,22 @@ Navigate to your data project repo and run:
 
 On the first run, the skill builds the lineage database in four steps:
 
+```mermaid
+flowchart LR
+    subgraph build ["One-time build"]
+        A["BigQuery\nINFORMATION_SCHEMA.JOBS"] --> D["SQLite\nlineage.db"]
+        B["Codebase Scan\nPython · SQL · JSON · YAML"] --> D
+        C["BigQuery\nINFORMATION_SCHEMA.VIEWS\n+ sqlglot parsing"] --> D
+    end
+
+    subgraph use ["Daily use — zero cost"]
+        D --> E["AI Agent"]
+        E --> F["'Which pipeline writes\nto this table?'"]
+        E --> G["'What source tables\nfeed into this view?'"]
+        E --> H["'Debug: why is this\ntable stale?'"]
+    end
+```
+
 1. **Query BigQuery job history** — Reads `INFORMATION_SCHEMA.JOBS` from the last 60 days to find every write operation (INSERT, MERGE, CREATE TABLE). For each write, it captures the target table, source tables, the pipeline that triggered it (from Airflow job labels or user email), and timestamps.
 
 2. **Scan your codebase** — Walks through your Python, SQL, and config files to find BigQuery table references. For Airflow repos, it extracts `dag_id` from DAG definitions, config files, and `Variable.get()` references, then maps each DAG to its target tables. For non-Airflow repos, it groups tables by file path.
@@ -54,7 +70,15 @@ On the first run, the skill builds the lineage database in four steps:
 
 4. **Write to SQLite** — Combines all three sources into a local `lineage.db` file. No cloud infrastructure, no external services — just a SQLite database you can query instantly.
 
-On subsequent runs, the skill checks the database age and skips the build if the data is fresh (less than 7 days old). You can force a refresh anytime with `/lineage-explorer refresh`.
+### Refresh Behavior
+
+The skill doesn't rebuild every time — it checks the database age first:
+
+- **Less than 7 days old** — Skips the build, queries the existing database directly. You'll see: "Lineage database is current (last updated N day(s) ago)."
+- **7 or more days old** — Asks if you'd like to refresh before answering.
+- **Explicit refresh** — Force a rebuild anytime with `/lineage-explorer refresh`.
+
+The 7-day threshold can be changed in `.lineage-explorer.json` with `"refresh_after_days": N`.
 
 ## What It Builds
 
