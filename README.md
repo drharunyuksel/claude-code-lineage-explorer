@@ -65,12 +65,12 @@ flowchart LR
     classDef bq fill:#4285F4,stroke:#1a73e8,color:#fff
     classDef code fill:#34A853,stroke:#1e8e3e,color:#fff
     classDef db fill:#FBBC04,stroke:#f9a825,color:#333
-    classDef agent fill:#EA4335,stroke:#d93025,color:#fff
-    classDef user fill:#FF6D01,stroke:#E65100,color:#fff
+    classDef agent fill:#303F9F,stroke:#1A237E,color:#fff
+    classDef user fill:#00897B,stroke:#00695C,color:#fff
 
-    linkStyle 3 stroke:#FF6D01,stroke-width:2px
-    linkStyle 4 stroke:#FF6D01,stroke-width:2px
-    linkStyle 5 stroke:#FF6D01,stroke-width:2px
+    linkStyle 3 stroke:#00897B,stroke-width:2px
+    linkStyle 4 stroke:#00897B,stroke-width:2px
+    linkStyle 5 stroke:#00897B,stroke-width:2px
     linkStyle 7 stroke:#34A853,stroke-width:2px
 ```
 
