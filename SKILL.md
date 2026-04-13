@@ -16,6 +16,12 @@ This skill must be installed inside the project's `.claude/skills/` directory, *
 ```
 <project-root>/.claude/skills/data-lineage/
 ├── SKILL.md
+├── scripts/
+│   ├── schema.sql
+│   ├── insert_job_history.py
+│   ├── airflow_scan.py
+│   ├── generic_scan.py
+│   └── parse_views.py
 ├── lineage.db      (created automatically on first run)
 └── .venv/          (created automatically on first run)
 ```
@@ -129,36 +135,7 @@ Run via Bash:
 ```bash
 DB_PATH="$SKILL_DIR/lineage.db"
 rm -f "$DB_PATH"
-sqlite3 "$DB_PATH" <<'SQL'
-CREATE TABLE lineage (
-  target_dataset  TEXT    NOT NULL,
-  target_name     TEXT    NOT NULL,
-  target_type     TEXT    NOT NULL,
-  source_tables   TEXT,
-  pipeline_id     TEXT    NOT NULL DEFAULT '',
-  pipeline_type   TEXT,
-  edge_source     TEXT    NOT NULL,
-  write_pattern   TEXT,
-  view_definition TEXT,
-  first_seen      TEXT,
-  last_seen       TEXT,
-  job_count       INTEGER,
-  user_email      TEXT,
-  PRIMARY KEY (target_dataset, target_name, pipeline_id, edge_source)
-);
-
-CREATE VIEW IF NOT EXISTS table_summary AS
-SELECT
-  target_dataset,
-  target_name,
-  target_type,
-  GROUP_CONCAT(DISTINCT pipeline_id) AS pipelines,
-  GROUP_CONCAT(DISTINCT edge_source) AS sources,
-  MAX(last_seen) AS last_written,
-  SUM(job_count) AS total_jobs
-FROM lineage
-GROUP BY target_dataset, target_name, target_type;
-SQL
+sqlite3 "$DB_PATH" < "$SKILL_DIR/scripts/schema.sql"
 echo "Created $DB_PATH"
 ```
 
@@ -233,40 +210,10 @@ GROUP BY target_dataset, target_name
 
 ### 5b. Insert results into SQLite
 
-The MCP tool returns a JSON array. Write a Python script via Bash to parse the result and insert into SQLite.
-
-Save the MCP query result as a JSON string. Then run via Bash:
+The MCP tool returns a JSON array. Save the result as a JSON string and pipe it into the insert script:
 
 ```bash
-$VENV_PYTHON -c "
-import json, sqlite3, sys
-
-data = json.loads(sys.stdin.read())
-conn = sqlite3.connect('$DB_PATH')
-cur = conn.cursor()
-
-for row in data:
-    source_csv = row.get('source_tables_csv', '')
-    source_json = json.dumps(source_csv.split(',')) if source_csv else '[]'
-    cur.execute('''
-        INSERT OR REPLACE INTO lineage
-        (target_dataset, target_name, target_type, source_tables, pipeline_id,
-         pipeline_type, edge_source, write_pattern, view_definition,
-         first_seen, last_seen, job_count, user_email)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        row['target_dataset'], row['target_name'], row['target_type'],
-        source_json, row.get('pipeline_id'), row.get('pipeline_type'),
-        row['edge_source'], row.get('write_pattern'),
-        row.get('view_definition'),
-        row.get('first_seen'), row.get('last_seen'),
-        row.get('job_count', 0), row.get('user_email')
-    ))
-
-conn.commit()
-print(f'Inserted {len(data)} job_history rows')
-conn.close()
-" <<< '<JSON_RESULT>'
+echo '<JSON_RESULT>' | $VENV_PYTHON "$SKILL_DIR/scripts/insert_job_history.py" "$DB_PATH"
 ```
 
 Replace `<JSON_RESULT>` with the actual JSON output from the MCP query. If the result is too large, write it to a temp file first and read from there.
@@ -277,360 +224,22 @@ Replace `<JSON_RESULT>` with the actual JSON output from the MCP query. If the r
 
 ### If ORCHESTRATOR = airflow
 
-Write the following Python script to a temp file and execute it via `$VENV_PYTHON`. This script is adapted from a production-tested Airflow lineage builder.
-
 ```bash
-cat > /tmp/lineage_airflow_scan.py << 'PYEOF'
-"""Airflow codebase scanner — extracts DAG-to-table mappings."""
-import argparse, json, os, re, sqlite3
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dags-dir', required=True)
-    parser.add_argument('--project-id', required=True)
-    parser.add_argument('--db-path', required=True)
-    args = parser.parse_args()
-
-    project_id = args.project_id
-    escaped_pid = re.escape(project_id)
-
-    TABLE_RE = re.compile(
-        rf'{escaped_pid}\.([a-zA-Z_][a-zA-Z0-9_]+)\.([a-zA-Z_][a-zA-Z0-9_]+)'
-    )
-    DAG_ID_RE = re.compile(
-        r'(?:dag_id\s*=\s*["\']([^"\']+)["\']'
-        r'|DAG\(\s*["\']([^"\']+)["\'])'
-    )
-    CONFIG_VAR_RE = re.compile(r'Variable\.get\(\s*["\']([^"\']+)["\']')
-    CONFIG_FILE_RE = re.compile(r'["\']([a-zA-Z][\w-]*\.json)["\']')
-    SUBSCRIPT_RE = re.compile(
-        r'Variable\.get\([^)]+\)\s*\[\s*\n?\s*["\']([^"\']+)["\']'
-    )
-    DAG_ID_BLOCKLIST = {'...', 'name', 'example'}
-
-    def _filter_dag_ids(raw_matches):
-        return [
-            (g1 or g2).lower()
-            for g1, g2 in raw_matches
-            if (g1 or g2) not in DAG_ID_BLOCKLIST
-            and len(g1 or g2) > 2
-        ]
-
-    def _classify_key(key):
-        k = key.lower().replace('-', '_')
-        if k in ('dag_id', 'dagid'):
-            return 'dag_id'
-        if 'dataset' in k or k.endswith('_ds') or k == 'ds':
-            return 'dataset'
-        if 'table' in k and k not in ('table_type', 'table_schema'):
-            return 'table'
-        return None
-
-    def _deep_extract(obj, found):
-        if isinstance(obj, dict):
-            for key, val in obj.items():
-                if isinstance(val, str) and val.strip():
-                    kind = _classify_key(key)
-                    if kind == 'dag_id':
-                        found['dag_ids'].add(val.strip().lower())
-                    elif kind == 'dataset':
-                        found['datasets'].add(val.strip())
-                    elif kind == 'table':
-                        found['tables'].add(val.strip())
-                _deep_extract(val, found)
-        elif isinstance(obj, list):
-            for item in obj:
-                _deep_extract(item, found)
-
-    def _empty_found():
-        return {'dag_ids': set(), 'datasets': set(), 'tables': set()}
-
-    def _extract_per_item(obj, global_datasets):
-        pairs = []
-        items_with_own_dag = []
-        if not isinstance(obj, (dict, list)):
-            return pairs, items_with_own_dag
-        lists_to_check = []
-        if isinstance(obj, list):
-            lists_to_check.append(obj)
-        elif isinstance(obj, dict):
-            for val in obj.values():
-                if isinstance(val, list):
-                    lists_to_check.append(val)
-                elif isinstance(val, dict):
-                    for v2 in val.values():
-                        if isinstance(v2, list):
-                            lists_to_check.append(v2)
-        for lst in lists_to_check:
-            for item in lst:
-                if not isinstance(item, dict):
-                    continue
-                item_found = _empty_found()
-                _deep_extract(item, item_found)
-                if item_found['dag_ids'] and item_found['tables']:
-                    datasets = item_found['datasets'] or global_datasets
-                    for did in item_found['dag_ids']:
-                        items_with_own_dag.append(did)
-                        for tbl in item_found['tables']:
-                            for ds in datasets:
-                                pairs.append((did, ds, tbl))
-        return pairs, items_with_own_dag
-
-    # Single filesystem walk
-    py_files = {}
-    sql_files = {}
-    json_index = {}
-    json_cache = {}
-
-    for root_dir, dirs, files in os.walk(args.dags_dir):
-        for f in files:
-            filepath = os.path.join(root_dir, f)
-            if f.endswith('.py'):
-                try:
-                    with open(filepath, 'r') as fh:
-                        py_files[filepath] = fh.read()
-                except Exception:
-                    pass
-            elif f.endswith('.sql'):
-                try:
-                    with open(filepath, 'r') as fh:
-                        sql_files[filepath] = (root_dir, fh.read())
-                except Exception:
-                    pass
-            elif f.endswith('.json'):
-                stem = f.rsplit('.', 1)[0]
-                normalized = re.sub(r'[_-]?(template|temp|sample|Template)$', '', stem)
-                json_index[normalized.lower()] = filepath
-                json_index[stem.lower()] = filepath
-                try:
-                    with open(filepath, 'r') as fh:
-                        json_cache[filepath] = json.load(fh)
-                except Exception:
-                    pass
-
-    # Source 1a: Python DAG files
-    dag_table_map = {}
-    dag_config_refs = {}
-    dir_dag_ids = {}
-
-    for filepath, content in py_files.items():
-        root_dir = os.path.dirname(filepath)
-        raw_matches = DAG_ID_RE.findall(content)
-        dag_ids_in_file = _filter_dag_ids(raw_matches)
-        for did in dag_ids_in_file:
-            dir_dag_ids.setdefault(root_dir, set()).add(did)
-        if not dag_ids_in_file:
-            continue
-        table_refs = TABLE_RE.findall(content)
-        for dag_id in dag_ids_in_file:
-            dag_table_map.setdefault(dag_id, set())
-            for dataset, table in table_refs:
-                dag_table_map[dag_id].add((dataset, table))
-        var_names = CONFIG_VAR_RE.findall(content)
-        file_refs = CONFIG_FILE_RE.findall(content)
-        subscript_keys = SUBSCRIPT_RE.findall(content)
-        for dag_id in dag_ids_in_file:
-            for var_name in var_names:
-                json_path = json_index.get(var_name.lower())
-                if json_path:
-                    sub_key = None
-                    for sk in subscript_keys:
-                        if sk.lower() != 'default':
-                            sub_key = sk
-                            break
-                    dag_config_refs.setdefault(dag_id, []).append((json_path, sub_key))
-            for fname in file_refs:
-                full_path = os.path.join(root_dir, fname)
-                if os.path.exists(full_path):
-                    dag_config_refs.setdefault(dag_id, []).append((full_path, None))
-                else:
-                    stem = fname.rsplit('.', 1)[0].lower()
-                    normalized = re.sub(r'[_-]?(template|temp|sample)$', '', stem)
-                    jp = json_index.get(stem) or json_index.get(normalized)
-                    if jp:
-                        dag_config_refs.setdefault(dag_id, []).append((jp, None))
-
-    # Source 1b: SQL files
-    for filepath, (root_dir, content) in sql_files.items():
-        table_refs = TABLE_RE.findall(content)
-        if not table_refs:
-            continue
-        dag_ids = dir_dag_ids.get(root_dir) or dir_dag_ids.get(os.path.dirname(root_dir))
-        if not dag_ids:
-            continue
-        for dag_id in dag_ids:
-            dag_table_map.setdefault(dag_id, set())
-            for dataset, table in table_refs:
-                dag_table_map[dag_id].add((dataset, table))
-
-    # Source 2a: JSON configs with own dag_id
-    for json_path, data in json_cache.items():
-        found = _empty_found()
-        _deep_extract(data, found)
-        if not found['tables']:
-            continue
-        per_item_pairs, _ = _extract_per_item(data, found['datasets'])
-        if per_item_pairs:
-            for did, ds, tbl in per_item_pairs:
-                dag_table_map.setdefault(did, set()).add((ds, tbl))
-        if found['dag_ids']:
-            for did in found['dag_ids']:
-                dag_table_map.setdefault(did, set())
-                for tbl in found['tables']:
-                    for ds in found['datasets']:
-                        dag_table_map[did].add((ds, tbl))
-
-    # Source 2b: Python->config linking
-    for dag_id, refs in dag_config_refs.items():
-        for json_path, subscript_key in refs:
-            data = json_cache.get(json_path)
-            if data is None:
-                continue
-            if subscript_key and isinstance(data, dict):
-                section = data.get(subscript_key, {})
-                found = _empty_found()
-                _deep_extract(section, found)
-                if 'default' in data and isinstance(data['default'], dict):
-                    default_found = _empty_found()
-                    _deep_extract(data['default'], default_found)
-                    found['datasets'].update(default_found['datasets'])
-            else:
-                found = _empty_found()
-                _deep_extract(data, found)
-            if not found['tables'] or not found['datasets']:
-                continue
-            dag_table_map.setdefault(dag_id, set())
-            for tbl in found['tables']:
-                for ds in found['datasets']:
-                    dag_table_map[dag_id].add((ds, tbl))
-
-    # Deduplication: each (dataset, table) -> one dag_id
-    table_candidates = {}
-    for dag_id, tables in dag_table_map.items():
-        for dataset, table in tables:
-            table_candidates.setdefault((dataset, table), set()).add(dag_id)
-
-    table_to_dag = {}
-    for key, dag_ids in table_candidates.items():
-        if len(dag_ids) == 1:
-            table_to_dag[key] = next(iter(dag_ids))
-
-    # Insert into SQLite
-    conn = sqlite3.connect(args.db_path)
-    cur = conn.cursor()
-    inserted = 0
-    skipped = 0
-    for (dataset, table), dag_id in table_to_dag.items():
-        # Skip if job_history already covers this (dataset, table, dag_id)
-        cur.execute('''
-            SELECT 1 FROM lineage
-            WHERE target_dataset = ? AND target_name = ? AND pipeline_id = ?
-              AND edge_source = 'job_history'
-        ''', (dataset, table, dag_id))
-        if cur.fetchone():
-            skipped += 1
-            continue
-        cur.execute('''
-            INSERT OR REPLACE INTO lineage
-            (target_dataset, target_name, target_type, source_tables, pipeline_id,
-             pipeline_type, edge_source, write_pattern, view_definition,
-             first_seen, last_seen, job_count, user_email)
-            VALUES (?, ?, 'TABLE', '[]', ?, 'airflow_dag', 'codebase_scan',
-                    NULL, NULL, NULL, NULL, 0, NULL)
-        ''', (dataset, table, dag_id))
-        inserted += 1
-    conn.commit()
-    conn.close()
-    print(f'Inserted {inserted} codebase_scan rows from {len(dag_table_map)} DAGs ({skipped} skipped — already in job_history)')
-
-if __name__ == '__main__':
-    main()
-PYEOF
-
-$VENV_PYTHON /tmp/lineage_airflow_scan.py \
+$VENV_PYTHON "$SKILL_DIR/scripts/airflow_scan.py" \
   --dags-dir "<DAGS_DIR>" \
   --project-id "<PROJECT_ID>" \
-  --db-path "<DB_PATH>"
+  --db-path "$DB_PATH"
 ```
 
-Replace `<DAGS_DIR>`, `<PROJECT_ID>`, and `<DB_PATH>` with the resolved configuration values.
+Replace `<DAGS_DIR>` and `<PROJECT_ID>` with the resolved configuration values.
 
 ### If ORCHESTRATOR = generic
 
-Write and execute a simpler Python script:
-
 ```bash
-cat > /tmp/lineage_generic_scan.py << 'PYEOF'
-"""Generic codebase scanner — maps files to BigQuery tables."""
-import argparse, json, os, re, sqlite3
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--repo-dir', required=True)
-    parser.add_argument('--project-id', required=True)
-    parser.add_argument('--db-path', required=True)
-    args = parser.parse_args()
-
-    escaped_pid = re.escape(args.project_id)
-    TABLE_RE = re.compile(
-        rf'{escaped_pid}\.([a-zA-Z_][a-zA-Z0-9_]+)\.([a-zA-Z_][a-zA-Z0-9_]+)'
-    )
-    WRITE_RE = re.compile(
-        r'(?:INSERT\s+INTO|MERGE\s+INTO|CREATE\s+(?:OR\s+REPLACE\s+)?TABLE|'
-        r'load_table_from_dataframe|load_table_from_json|load_table_from_uri|'
-        r'copy_table)',
-        re.IGNORECASE
-    )
-
-    file_table_map = {}  # filepath -> set of (dataset, table)
-
-    for root_dir, dirs, files in os.walk(args.repo_dir):
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        for f in files:
-            if not f.endswith(('.py', '.sql', '.json', '.yaml', '.yml')):
-                continue
-            filepath = os.path.join(root_dir, f)
-            try:
-                with open(filepath, 'r') as fh:
-                    content = fh.read()
-            except Exception:
-                continue
-            table_refs = TABLE_RE.findall(content)
-            if not table_refs:
-                continue
-            has_writes = bool(WRITE_RE.search(content))
-            if has_writes:
-                rel_path = os.path.relpath(filepath, args.repo_dir)
-                file_table_map.setdefault(rel_path, set())
-                for dataset, table in table_refs:
-                    file_table_map[rel_path].add((dataset, table))
-
-    conn = sqlite3.connect(args.db_path)
-    cur = conn.cursor()
-    inserted = 0
-    for filepath, tables in file_table_map.items():
-        for dataset, table in tables:
-            cur.execute('''
-                INSERT OR REPLACE INTO lineage
-                (target_dataset, target_name, target_type, source_tables, pipeline_id,
-                 pipeline_type, edge_source, write_pattern, view_definition,
-                 first_seen, last_seen, job_count, user_email)
-                VALUES (?, ?, 'TABLE', '[]', ?, 'script', 'codebase_scan',
-                        NULL, NULL, NULL, NULL, 0, NULL)
-            ''', (dataset, table, filepath))
-            inserted += 1
-    conn.commit()
-    conn.close()
-    print(f'Inserted {inserted} codebase_scan rows from {len(file_table_map)} files')
-
-if __name__ == '__main__':
-    main()
-PYEOF
-
-$VENV_PYTHON /tmp/lineage_generic_scan.py \
+$VENV_PYTHON "$SKILL_DIR/scripts/generic_scan.py" \
   --repo-dir "<REPO_ROOT>" \
   --project-id "<PROJECT_ID>" \
-  --db-path "<DB_PATH>"
+  --db-path "$DB_PATH"
 ```
 
 ---
@@ -655,81 +264,11 @@ WHERE table_schema NOT LIKE r'\_%'
 
 ### 7b. Parse with sqlglot and insert into SQLite
 
-Save the MCP query result as JSON. Write and execute this Python script:
+Save the MCP query result as JSON to a temp file, then run the parser:
 
 ```bash
-cat > /tmp/lineage_view_parser.py << 'PYEOF'
-"""Parse view definitions with sqlglot, insert into lineage SQLite."""
-import json, sqlite3, sys
-from datetime import datetime, timezone
-
-try:
-    import sqlglot
-except ImportError:
-    print("sqlglot not available — skipping view parsing")
-    sys.exit(0)
-
-def main():
-    db_path = sys.argv[1]
-    views_json = sys.argv[2]
-
-    with open(views_json, 'r') as f:
-        views = json.load(f)
-
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    inserted = 0
-    errors = 0
-
-    for view in views:
-        dataset = view['dataset']
-        view_name = view['view_name']
-        view_sql = view.get('view_definition', '')
-
-        if not view_sql:
-            continue
-
-        try:
-            statements = sqlglot.parse(view_sql, dialect='bigquery')
-            source_tables = set()
-            for stmt in statements:
-                if stmt is None:
-                    continue
-                for table in stmt.find_all(sqlglot.exp.Table):
-                    table_name = table.name
-                    db = table.db
-                    if table_name and not table_name.startswith('_'):
-                        src_dataset = db if db else dataset
-                        source_tables.add(f'{src_dataset}.{table_name}')
-
-            if source_tables:
-                source_json = json.dumps(sorted(source_tables))
-                cur.execute('''
-                    INSERT OR REPLACE INTO lineage
-                    (target_dataset, target_name, target_type, source_tables,
-                     pipeline_id, pipeline_type, edge_source, write_pattern,
-                     view_definition, first_seen, last_seen, job_count, user_email)
-                    VALUES (?, ?, 'VIEW', ?, NULL, NULL, 'view_definition',
-                            NULL, ?, ?, ?, 1, NULL)
-                ''', (dataset, view_name, source_json, view_sql, now, now))
-                inserted += 1
-
-        except Exception as e:
-            errors += 1
-
-    conn.commit()
-    conn.close()
-    print(f'Inserted {inserted} view_definition rows ({errors} parse errors)')
-
-if __name__ == '__main__':
-    main()
-PYEOF
-
-# Write the MCP query result to a temp file
 echo '<VIEWS_JSON>' > /tmp/lineage_views.json
-
-$VENV_PYTHON /tmp/lineage_view_parser.py "$DB_PATH" /tmp/lineage_views.json
+$VENV_PYTHON "$SKILL_DIR/scripts/parse_views.py" "$DB_PATH" /tmp/lineage_views.json
 ```
 
 Replace `<VIEWS_JSON>` with the JSON output from the MCP query in Step 7a. For large result sets, write the JSON to the temp file using a heredoc or Python.
@@ -779,5 +318,5 @@ Example queries:
 Remove temp files:
 
 ```bash
-rm -f /tmp/lineage_airflow_scan.py /tmp/lineage_generic_scan.py /tmp/lineage_view_parser.py /tmp/lineage_views.json
+rm -f /tmp/lineage_views.json
 ```
