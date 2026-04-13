@@ -23,13 +23,17 @@ A Claude Code skill that builds BigQuery table lineage from your codebase and IN
 
 ## Install
 
-```bash
-claude install github:drharunyuksel/claude-code-lineage-explorer
+Open Claude Code and paste:
+
 ```
+Install this skill: https://github.com/drharunyuksel/claude-code-lineage-explorer
+```
+
+Claude will read the repository and set up the skill for you.
 
 ## Prerequisites
 
-- [BigQuery MCP tool](https://github.com/ergut/mcp-bigquery) configured in your Claude Code settings
+- **A BigQuery MCP tool** configured in your Claude Code settings. Any MCP server that can run read-only BigQuery queries will work. For example, [mcp-bigquery](https://github.com/ergut/mcp-bigquery) is a lightweight, read-only option.
 - Read access to `INFORMATION_SCHEMA.JOBS` and `INFORMATION_SCHEMA.VIEWS` in your BigQuery project
 
 ## Usage
@@ -162,6 +166,18 @@ The skill works with zero configuration for standard setups. Optionally create `
 
 - **Airflow**: Extracts `dag_id` from decorators, `DAG()` constructors, `Variable.get()` configs, and JSON config files. Enhanced lineage with pipeline attribution.
 - **Generic**: Works with any orchestrator (Prefect, Dagster, cron, raw scripts). Groups tables by file path.
+
+## Data Warehouse Support
+
+This skill is designed and tested for **BigQuery**. It queries BigQuery's `INFORMATION_SCHEMA` and parses BigQuery SQL dialect.
+
+However, since this is a Claude Code skill (not compiled code), your AI agent can adapt it for other data warehouses. Try prompting:
+
+```
+Install this skill for our Snowflake warehouse: https://github.com/drharunyuksel/claude-code-lineage-explorer
+```
+
+Claude will read the skill, understand the approach, and modify the `INFORMATION_SCHEMA` queries and SQL parsing to match your warehouse's syntax.
 
 ## License
 
